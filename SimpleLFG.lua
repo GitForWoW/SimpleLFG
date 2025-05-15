@@ -5,6 +5,35 @@ local SIMPLELFG_VERSION = "1.0"
 -- Flag de debug global
 local SimpleLFGDebug = false
 
+-- Patrones de detección
+local LFG_PATTERNS = {
+    "lfg",
+    "busco grupo",
+    "busco party",
+    "busco raid",
+    "necesito grupo",
+    "necesito party",
+    "necesito raid"
+}
+
+local LFM_PATTERNS = {
+    "lfm",
+    "busco gente",
+    "busco jugadores",
+    "armando grupo",
+    "armando party",
+    "armando raid",
+    "necesito gente",
+    "necesito jugadores",
+    "armo",
+    "lf1m",
+    "lf2m",
+    "lf3m",
+    "lf4m",
+    "necesito",
+    "nito",
+}
+
 -- Configuración predeterminada
 local defaultConfig = {
     enabled = true,
@@ -13,8 +42,7 @@ local defaultConfig = {
         position = 45,
     },
     entryTimeout = 300, -- 5 minutos para expirar entradas
-    scanWorldChannel = true,
-    worldChannelName = "World",
+    worldChannelName = "world",
 }
 
 -- Variables locales
@@ -78,13 +106,12 @@ end
 
 -- Procesar mensajes del canal
 function SimpleLFG:ProcessChannelMessage(message, sender, _, channelName)
-    if not SimpleLFGConfig.enabled or not SimpleLFGConfig.scanWorldChannel then return end
-    -- Permitir canal World o, si debug está activo, cualquier canal
-    if not SimpleLFGDebug and (not channelName or not string.find(channelName, SimpleLFGConfig.worldChannelName)) then return end
+        
     if not sender then sender = "?" end
     if SimpleLFGDebug then
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[SimpleLFG]|r Leyendo mensaje: "..message)
     end
+    
     local playerName = "?"
     if type(sender) == "string" and sender ~= "" then
         local match = strmatch and strmatch(sender, "([^-]+)") or nil
@@ -94,25 +121,35 @@ function SimpleLFG:ProcessChannelMessage(message, sender, _, channelName)
             playerName = sender
         end
     end
+    
     local msgLower = string.lower(message)
-    if string.find(msgLower, "lfg") then
-        if SimpleLFGDebug then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffffff00[SimpleLFG]|r Detectado LFG de "..playerName)
+    
+    -- Verificar patrones LFG
+    for _, pattern in ipairs(LFG_PATTERNS) do
+        if string.find(msgLower, pattern) then
+            if SimpleLFGDebug then
+                DEFAULT_CHAT_FRAME:AddMessage("|cffffff00[SimpleLFG]|r Detectado LFG de "..playerName)
+            end
+            SimpleLFG:AddEntry("lfg", playerName, {
+                message = message,
+                timestamp = GetTime(),
+            })
+            return
         end
-        SimpleLFG:AddEntry("lfg", playerName, {
-            message = message,
-            timestamp = GetTime(),
-        })
-        return
-    elseif string.find(msgLower, "lfm") then
-        if SimpleLFGDebug then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffffff00[SimpleLFG]|r Detectado LFM de "..playerName)
+    end
+    
+    -- Verificar patrones LFM
+    for _, pattern in ipairs(LFM_PATTERNS) do
+        if string.find(msgLower, pattern) then
+            if SimpleLFGDebug then
+                DEFAULT_CHAT_FRAME:AddMessage("|cffffff00[SimpleLFG]|r Detectado LFM de "..playerName)
+            end
+            SimpleLFG:AddEntry("lfm", playerName, {
+                message = message,
+                timestamp = GetTime(),
+            })
+            return
         end
-        SimpleLFG:AddEntry("lfm", playerName, {
-            message = message,
-            timestamp = GetTime(),
-        })
-        return
     end
 end
 
@@ -383,9 +420,22 @@ function SimpleLFG:UpdateDisplay()
     for playerName, data in pairs(displayEntries) do
         table.insert(sortedEntries, {name = playerName, data = data})
     end
+    
+    -- Ordenar por timestamp descendente (más reciente primero)
     table.sort(sortedEntries, function(a, b)
         return a.data.timestamp > b.data.timestamp
     end)
+    
+    -- Ajustar el espaciado vertical
+    local entryHeight = 20 -- Aumentar el espacio entre entradas
+    local startY = -80 -- Ajustar la posición inicial
+    
+    -- Limpiar todas las entradas primero
+    for i = 1, 13 do
+        SimpleLFGFrame.entries[i]:Hide()
+    end
+    
+    -- Mostrar las entradas en orden (más recientes arriba)
     for i = 1, 13 do
         local entry = SimpleLFGFrame.entries[i]
         local playerData = sortedEntries[i]
@@ -409,10 +459,10 @@ function SimpleLFG:UpdateDisplay()
             entry.playerName:SetText(playerName)
             entry.dungeon:SetText(msg)
             entry.timer:SetText(SimpleLFG:FormatTime(currentTime - data.timestamp))
+            
+            -- Ajustar la posición vertical (más recientes arriba)
+            entry:SetPoint("TOPLEFT", 15, startY - ((i-1) * entryHeight))
             entry:Show()
-        else
-            entry.playerData = nil
-            entry:Hide()
         end
     end
 end
@@ -431,9 +481,6 @@ end
 
 -- Crear icono del minimapa
 function SimpleLFG:CreateMinimapIcon()
-    -- Utilizar LibDataBroker y LibDBIcon si están disponibles
-    -- Para simplificar, usaremos un enfoque básico
-    
     if iconFrame then return end
     
     -- Asegurarse de que SimpleLFGConfig existe antes de continuar
@@ -442,42 +489,43 @@ function SimpleLFG:CreateMinimapIcon()
     end
     
     iconFrame = CreateFrame("Button", "SimpleLFGMinimapIcon", Minimap)
-    iconFrame:SetWidth(32)
-    iconFrame:SetHeight(32)
+    iconFrame:SetWidth(31)
+    iconFrame:SetHeight(31)
     iconFrame:SetFrameStrata("MEDIUM")
+    iconFrame:SetFrameLevel(8)
     iconFrame:SetMovable(true)
+    iconFrame:EnableMouse(true)
+    iconFrame:RegisterForDrag("LeftButton")
+    iconFrame:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
     
     -- Textura del icono
     iconFrame.icon = iconFrame:CreateTexture(nil, "BACKGROUND")
     iconFrame.icon:SetTexture("Interface\\Icons\\INV_Misc_Note_01")
     iconFrame.icon:SetWidth(20)
     iconFrame.icon:SetHeight(20)
-    iconFrame.icon:SetPoint("CENTER", 0, 0)
+    iconFrame.icon:SetPoint("TOPLEFT", iconFrame, "TOPLEFT", 7, -5)
     
     -- Borde del icono
     iconFrame.border = iconFrame:CreateTexture(nil, "OVERLAY")
     iconFrame.border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-    iconFrame.border:SetWidth(52)
-    iconFrame.border:SetHeight(52)
-    iconFrame.border:SetPoint("CENTER", 12, -12)
-    
-    -- Posicionar alrededor del minimapa
-    SimpleLFG:UpdateMinimapIcon()
+    iconFrame.border:SetWidth(53)
+    iconFrame.border:SetHeight(53)
+    iconFrame.border:SetPoint("TOPLEFT", iconFrame, "TOPLEFT", 0, 0)
     
     -- Scripts
-    iconFrame:RegisterForDrag("LeftButton")
     iconFrame:SetScript("OnDragStart", function()
         this:StartMoving()
     end)
     
     iconFrame:SetScript("OnDragStop", function()
         this:StopMovingOrSizing()
-        local x, y = this:GetCenter()
-        local cx, cy = Minimap:GetCenter()
+        local xpos, ypos = GetCursorPosition()
+        local xmin, ymin = Minimap:GetLeft(), Minimap:GetBottom()
         
-        -- Calcular posición en radianes
-        local angle = math.atan2(y - cy, x - cx)
-        SimpleLFGConfig.minimap.position = angle
+        xpos = xmin - xpos / UIParent:GetScale() + 70
+        ypos = ypos / UIParent:GetScale() - ymin - 70
+        
+        SimpleLFGConfig.minimap.position = math.deg(math.atan2(ypos, xpos))
         SimpleLFG:UpdateMinimapIcon()
     end)
     
@@ -512,6 +560,9 @@ function SimpleLFG:CreateMinimapIcon()
     end)
     
     iconFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    
+    -- Posicionar alrededor del minimapa
+    SimpleLFG:UpdateMinimapIcon()
 end
 
 -- Actualizar posición del icono del minimapa
@@ -548,11 +599,11 @@ function SimpleLFG:UpdateMinimapIcon()
     end
     
     -- Posicionar alrededor del minimapa
-    local angle = SimpleLFGConfig.minimap.position
-    local x = math.cos(angle) * 80
-    local y = math.sin(angle) * 80
+    local angle = math.rad(SimpleLFGConfig.minimap.position)
+    local x = 54 - (80 * math.cos(angle))
+    local y = (80 * math.sin(angle)) - 55
     
-    iconFrame:SetPoint("CENTER", Minimap, "CENTER", x, y)
+    iconFrame:SetPoint("TOPLEFT", Minimap, "TOPLEFT", x, y)
 end
 
 -- Ventana de configuración
