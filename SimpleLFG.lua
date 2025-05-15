@@ -305,6 +305,7 @@ end
 function SimpleLFG:CreateMainFrame()
     if SimpleLFGFrame then return end
     SimpleLFGFrame = CreateFrame("Frame", "SimpleLFGFrame", UIParent)
+    table.insert(UISpecialFrames, "SimpleLFGFrame")
     local frame = SimpleLFGFrame
     frame:SetWidth(400)
     frame:SetHeight(300)
@@ -431,19 +432,32 @@ function SimpleLFG:CreateMainFrame()
         entry.playerName:SetPoint("LEFT", 5, 0)
         entry.playerName:SetWidth(80)
         entry.playerName:SetJustifyH("LEFT")
-        entry.level = entry:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        entry.level:SetPoint("LEFT", entry.playerName, "RIGHT", 0, 0)
-        entry.level:SetWidth(40)
-        entry.level:SetJustifyH("CENTER")
         entry.dungeon = entry:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        entry.dungeon:SetPoint("LEFT", entry.level, "RIGHT", 0, 0)
+        entry.dungeon:SetPoint("LEFT", entry.playerName, "RIGHT", 0, 0)
         entry.dungeon:SetWidth(170)
         entry.dungeon:SetJustifyH("LEFT")
         entry.timer = entry:CreateFontString(nil, "ARTWORK", "GameFontNormal")
         entry.timer:SetPoint("LEFT", entry.dungeon, "RIGHT", 0, 0)
         entry.timer:SetWidth(50)
         entry.timer:SetJustifyH("RIGHT")
-        
+
+        -- Botón de borrar (cruz)
+        entry.deleteButton = CreateFrame("Button", nil, entry, "UIPanelCloseButton")
+        entry.deleteButton:SetWidth(18)
+        entry.deleteButton:SetHeight(18)
+        entry.deleteButton:SetPoint("RIGHT", entry, "RIGHT", 0, 0)
+        entry.deleteButton:SetScript("OnClick", function()
+            if entry.playerData then
+                if activeTab == 1 then
+                    entries.lfg[entry.playerData] = nil
+                else
+                    entries.lfm[entry.playerData] = nil
+                end
+                SimpleLFG:UpdateDisplay()
+            end
+        end)
+        entry.deleteButton:Hide()
+
         -- Tooltip
         entry:SetScript("OnEnter", function()
             if not this.playerData then return end
@@ -451,7 +465,6 @@ function SimpleLFG:CreateMainFrame()
             if not data then return end
             GameTooltip:SetOwner(this, "ANCHOR_RIGHT")
             GameTooltip:AddLine("|cffffff00"..this.playerData.."|r", 1, 1, 1)
-            GameTooltip:AddLine("|cffccccccNivel:|r "..(SimpleLFG:GetPlayerLevel(this.playerData) or "-"))
             GameTooltip:AddLine("|cffccccccMensaje:|r "..(data.message or ""))
             GameTooltip:AddLine("|cffccccccHace:|r "..SimpleLFG:FormatTime(GetTime() - data.timestamp))
             GameTooltip:Show()
@@ -471,13 +484,8 @@ function SimpleLFG:CreateMainFrame()
     headerPlayer:SetWidth(80)
     headerPlayer:SetText("Jugador")
     
-    local headerLevel = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    headerLevel:SetPoint("LEFT", headerPlayer, "RIGHT", 0, 0)
-    headerLevel:SetWidth(40)
-    headerLevel:SetText("Nivel")
-    
     local headerDungeon = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    headerDungeon:SetPoint("LEFT", headerLevel, "RIGHT", 0, 0)
+    headerDungeon:SetPoint("LEFT", headerPlayer, "RIGHT", 0, 0)
     headerDungeon:SetWidth(170)
     headerDungeon:SetText("Mensaje")
     
@@ -515,7 +523,7 @@ function SimpleLFG:UpdateDisplay()
     -- Configurar scroll
     local numEntries = table.getn(sortedEntries)
     FauxScrollFrame_Update(SimpleLFGScrollFrame, numEntries, 9, 16)
-    
+
     -- Mostrar las entradas
     for i = 1, 9 do
         local entry = SimpleLFGFrame.entries[i]
@@ -528,13 +536,6 @@ function SimpleLFG:UpdateDisplay()
             local currentTime = GetTime()
             entry.playerData = playerName
             
-            -- Intentar obtener el nivel del jugador
-            local level = SimpleLFG:GetPlayerLevel(playerName)
-            if level and level ~= "-" then
-                data.level = level
-            end
-            entry.level:SetText(data.level or "-")
-            
             -- Truncar mensaje si es muy largo
             local msg = data.message or ""
             if string.len(msg) > 30 then
@@ -545,8 +546,10 @@ function SimpleLFG:UpdateDisplay()
             entry.dungeon:SetText(msg)
             entry.timer:SetText(SimpleLFG:FormatTime(currentTime - data.timestamp))
             entry:Show()
+            entry.deleteButton:Show()
         else
             entry:Hide()
+            entry.deleteButton:Hide()
         end
     end
 end
@@ -786,68 +789,6 @@ function SimpleLFG:ShowConfig()
     end
     
     ConfigFrame:Show()
-end
-
--- Encontrar el nivel del jugador
-function SimpleLFG:GetPlayerLevel(playerName)
-    if playerName == UnitName("player") then
-        return UnitLevel("player")
-    end
-    
-    if not SimpleLFG.playerDB then
-        SimpleLFG.playerDB = {}
-    end
-
-    -- Si ya tenemos el nivel, lo devolvemos
-    if SimpleLFG.playerDB[playerName] then
-        return SimpleLFG.playerDB[playerName]
-    end
-
-    -- Si ya está en la cola, no lo agregamos de nuevo
-    for _, name in ipairs(SimpleLFG.whoQueue) do
-        if name == playerName then
-            return "-"
-        end
-    end
-
-    -- Agregar a la cola y lanzar consulta si no hay otra activa
-    table.insert(SimpleLFG.whoQueue, playerName)
-    SimpleLFG:ProcessWhoQueue()
-
-    return "-"
-end
-
-function SimpleLFG:ProcessWhoQueue()
-    if SimpleLFG.whoActive or table.getn(SimpleLFG.whoQueue) == 0 then return end
-    local nextName = table.remove(SimpleLFG.whoQueue, 1)
-    if nextName then
-        SimpleLFG.whoActive = nextName
-        SendWho(nextName)
-    end
-end
-
--- Handler para WHO_LIST_UPDATE
-if not SimpleLFG._whoEventFrame then
-    SimpleLFG._whoEventFrame = CreateFrame("Frame")
-    SimpleLFG._whoEventFrame:RegisterEvent("WHO_LIST_UPDATE")
-    SimpleLFG._whoEventFrame:SetScript("OnEvent", function()
-        if event == "WHO_LIST_UPDATE" and SimpleLFG.whoActive then
-            local numWhos = GetNumWhoResults()
-            for i = 1, numWhos do
-                local name, _, level = GetWhoInfo(i)
-                if name and level and level > 0 then
-                    SimpleLFG.playerDB[name] = level
-                end
-            end
-            SimpleLFG.whoActive = false
-            -- Actualizar la UI si está visible
-            if SimpleLFGFrame and SimpleLFGFrame:IsVisible() then
-                SimpleLFG:UpdateDisplay()
-            end
-            -- Procesar siguiente en la cola
-            SimpleLFG:ProcessWhoQueue()
-        end
-    end)
 end
 
 -- Inicializar el addon
