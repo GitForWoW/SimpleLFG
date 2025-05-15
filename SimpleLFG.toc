@@ -1,0 +1,8 @@
+## Interface: 11200
+## Title: SimpleLFG
+## Notes: Centraliza solicitudes de grupo del canal mundial en una interfaz ordenada
+## Author: GitForWoW
+## Version: 1.0
+## SavedVariables: SimpleLFGConfig
+
+SimpleLFG.lua 
