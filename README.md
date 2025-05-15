@@ -19,11 +19,3 @@ Un addon que centraliza las solicitudes de grupo (LFG/LFM) del canal mundial en 
 3. Haz clic en el icono del minimapa o escribe /simplelfg para abrir la interfaz
 4. Usa las pestañas para ver jugadores buscando grupo o armando grupos
 5. Haz clic en una entrada para susurrar al jugador
-
-## Configuración
-
-Usa `/simplelfg config` para abrir el panel de configuración donde puedes:
-- Activar/desactivar el addon
-- Ocultar el icono del minimapa
-- Ajustar el tiempo de expiración de las entradas
-- Personalizar los patrones de detección para diferentes idiomas 
