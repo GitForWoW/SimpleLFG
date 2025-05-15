@@ -1,6 +1,8 @@
 # SimpleLFG
 
 Un addon que centraliza las solicitudes de grupo (LFG/LFM) del canal mundial en una interfaz organizada.
+![image](https://github.com/user-attachments/assets/5daac567-854a-4f1f-9cbf-8165a9a24eef)
+
 
 ## Características
 
