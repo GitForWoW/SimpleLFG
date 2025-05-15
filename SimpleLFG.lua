@@ -32,6 +32,11 @@ local LFM_PATTERNS = {
     "lf4m",
     "necesito",
     "nito",
+    "necesitamos",
+    "monto",
+    "busco",
+    "lf",
+    "se busca",
 }
 
 -- Configuración predeterminada
@@ -54,6 +59,10 @@ local frameCreated = false
 local activeTab = 1 -- 1 = LFG, 2 = LFM
 local iconFrame = nil
 local strmatch = (getglobal and getglobal("string") and getglobal("string").match) or (string and string.match)
+
+-- Cola de consultas pendientes para /who
+SimpleLFG.whoQueue = SimpleLFG.whoQueue or {}
+SimpleLFG.whoActive = false
 
 -- Función para inicializar el addon
 function SimpleLFG:Initialize()
@@ -199,6 +208,62 @@ function SimpleLFG:StartCleanupTimer()
     end)
 end
 
+-- Función para generar casos de prueba
+function SimpleLFG:GenerateTestCases()
+    if not SimpleLFGDebug then return end
+    
+    -- Limpiar entradas existentes
+    entries.lfg = {}
+    entries.lfm = {}
+    
+    -- Nombres de prueba
+    local testNames = {
+        "Gandalf", "Legolas", "Aragorn", "Gimli", "Frodo", "Sam", "Merry", "Pippin",
+        "Boromir", "Galadriel", "Elrond", "Arwen", "Théoden", "Éomer", "Éowyn",
+        "Saruman", "Gollum", "Sauron", "Nazgul", "Balrog"
+    }
+    
+    -- Mensajes de prueba
+    local testMessages = {
+        "LFG UBRS", "LFG Scholo", "LFG Strat", "LFG DM", "LFG BRD",
+        "LFG LBRS", "LFG MC", "LFG BWL", "LFG ZG", "LFG AQ20",
+        "LFG AQ40", "LFG Naxx", "LFG Onyxia", "LFG World Boss",
+        "LFG 5 man", "LFG 10 man", "LFG 20 man", "LFG 40 man",
+        "LFG PvP", "LFG Raid"
+    }
+    
+    -- Generar entre 10 y 20 entradas aleatorias para cada lista
+    local numEntries = math.random(10, 20)
+    
+    -- Generar entradas LFG
+    for i = 1, numEntries do
+        local name = testNames[math.random(1, table.getn(testNames))]
+        local message = testMessages[math.random(1, table.getn(testMessages))]
+        local timestamp = GetTime() - math.random(0, 300) -- Entre 0 y 5 minutos atrás
+        SimpleLFG:AddEntry("lfg", name, {
+            message = message,
+            timestamp = timestamp
+        })
+    end
+    
+    -- Generar entradas LFM
+    numEntries = math.random(10, 20)
+    for i = 1, numEntries do
+        local name = testNames[math.random(1, table.getn(testNames))]
+        local message = testMessages[math.random(1, table.getn(testMessages))]
+        local timestamp = GetTime() - math.random(0, 300)
+        SimpleLFG:AddEntry("lfm", name, {
+            message = message,
+            timestamp = timestamp
+        })
+    end
+    
+    -- Actualizar la interfaz
+    if SimpleLFGFrame and SimpleLFGFrame:IsVisible() then
+        SimpleLFG:UpdateDisplay()
+    end
+end
+
 -- Procesar comandos slash
 function SimpleLFG:ProcessSlashCommand(msg)
     if msg == "config" then
@@ -214,6 +279,7 @@ function SimpleLFG:ProcessSlashCommand(msg)
         SimpleLFGDebug = not SimpleLFGDebug
         if SimpleLFGDebug then
             DEFAULT_CHAT_FRAME:AddMessage("|cff55ff55[SimpleLFG]|r Debug activado.")
+            SimpleLFG:GenerateTestCases()
         else
             DEFAULT_CHAT_FRAME:AddMessage("|cff55ff55[SimpleLFG]|r Debug desactivado.")
         end
@@ -282,7 +348,7 @@ function SimpleLFG:CreateMainFrame()
     -- Pestañas
     frame.selectedTab = 1
     -- Crear pestañas personalizadas
-    local lfgTab = CreateFrame("Button", nil, frame) -- sin nombre global
+    local lfgTab = CreateFrame("Button", nil, frame)
     lfgTab:SetWidth(120)
     lfgTab:SetHeight(24)
     lfgTab:SetPoint("TOPLEFT", 20, -30)
@@ -294,7 +360,14 @@ function SimpleLFG:CreateMainFrame()
     lfgTabText:SetPoint("CENTER", 0, 0)
     lfgTabText:SetText("Buscando Grupo")
     lfgTab.text = lfgTabText
-    local lfmTab = CreateFrame("Button", nil, frame) -- sin nombre global
+    
+    -- Contador de items LFG
+    local lfgCount = lfgTab:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lfgCount:SetPoint("LEFT", lfgTabText, "RIGHT", 5, 0)
+    lfgCount:SetText("(0)")
+    lfgTab.count = lfgCount
+    
+    local lfmTab = CreateFrame("Button", nil, frame)
     lfmTab:SetWidth(120)
     lfmTab:SetHeight(24)
     lfmTab:SetPoint("LEFT", lfgTab, "RIGHT", 10, 0)
@@ -306,10 +379,18 @@ function SimpleLFG:CreateMainFrame()
     lfmTabText:SetPoint("CENTER", 0, 0)
     lfmTabText:SetText("Armando Grupo")
     lfmTab.text = lfmTabText
+    
+    -- Contador de items LFM
+    local lfmCount = lfmTab:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lfmCount:SetPoint("LEFT", lfmTabText, "RIGHT", 5, 0)
+    lfmCount:SetText("(0)")
+    lfmTab.count = lfmCount
+    
     frame.lfgTab = lfgTab
     frame.lfmTab = lfmTab
     frame.lfgTabBg = lfgTabBg
     frame.lfmTabBg = lfmTabBg
+    
     -- Función para seleccionar pestaña
     local function SelectTab(tabIndex)
         if tabIndex == 1 then
@@ -331,22 +412,21 @@ function SimpleLFG:CreateMainFrame()
     lfmTab:SetScript("OnClick", function() SelectTab(2) end)
     SelectTab(1)
     
+    -- Crear ScrollFrame
+    local scrollFrame = CreateFrame("ScrollFrame", "SimpleLFGScrollFrame", frame, "FauxScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 15, -80)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -35, 50)
+    scrollFrame:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(16, function() SimpleLFG:UpdateDisplay() end)
+    end)
+    
     -- Crear líneas para entradas
-    local alternate = false
     frame.entries = {}
-    for i = 1, 13 do -- Mostrar 13 entradas a la vez
+    for i = 1, 9 do
         local entry = CreateFrame("Button", nil, frame)
-        entry.bg = entry:CreateTexture(nil, "BACKGROUND")
-        entry.bg:SetAllPoints()
-        -- if alternate then
-        --     entry.bg:SetColorTexture(0.13, 0.13, 0.13, 0.7)
-        -- else
-        --     entry.bg:SetColorTexture(0.18, 0.18, 0.18, 0.7)
-        -- end
-        -- alternate = not alternate
         entry:SetWidth(370)
         entry:SetHeight(16)
-        entry:SetPoint("TOPLEFT", 15, -80 + ((i-1) * 16))
+        entry:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -80 - ((i-1) * 16))
         entry.playerName = entry:CreateFontString(nil, "ARTWORK", "GameFontNormal")
         entry.playerName:SetPoint("LEFT", 5, 0)
         entry.playerName:SetWidth(80)
@@ -363,7 +443,8 @@ function SimpleLFG:CreateMainFrame()
         entry.timer:SetPoint("LEFT", entry.dungeon, "RIGHT", 0, 0)
         entry.timer:SetWidth(50)
         entry.timer:SetJustifyH("RIGHT")
-        -- Tooltip claro y consistente
+        
+        -- Tooltip
         entry:SetScript("OnEnter", function()
             if not this.playerData then return end
             local data = entries.lfg[this.playerData] or entries.lfm[this.playerData]
@@ -405,10 +486,6 @@ function SimpleLFG:CreateMainFrame()
     headerTime:SetWidth(50)
     headerTime:SetText("Tiempo")
     
-    local headerInfo = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    headerInfo:SetPoint("LEFT", headerDungeon, "RIGHT", 100, 0)
-    headerInfo:Hide() -- Ocultamos la columna de detalles
-    
     frameCreated = true
 end
 
@@ -426,43 +503,50 @@ function SimpleLFG:UpdateDisplay()
         return a.data.timestamp > b.data.timestamp
     end)
     
-    -- Ajustar el espaciado vertical
-    local entryHeight = 20 -- Aumentar el espacio entre entradas
-    local startY = -80 -- Ajustar la posición inicial
+    -- Actualizar contadores
+    local lfgCount = 0
+    local lfmCount = 0
+    for _ in pairs(entries.lfg) do lfgCount = lfgCount + 1 end
+    for _ in pairs(entries.lfm) do lfmCount = lfmCount + 1 end
     
-    -- Limpiar todas las entradas primero
-    for i = 1, 13 do
-        SimpleLFGFrame.entries[i]:Hide()
-    end
+    SimpleLFGFrame.lfgTab.count:SetText("("..lfgCount..")")
+    SimpleLFGFrame.lfmTab.count:SetText("("..lfmCount..")")
     
-    -- Mostrar las entradas en orden (más recientes arriba)
-    for i = 1, 13 do
+    -- Configurar scroll
+    local numEntries = table.getn(sortedEntries)
+    FauxScrollFrame_Update(SimpleLFGScrollFrame, numEntries, 9, 16)
+    
+    -- Mostrar las entradas
+    for i = 1, 9 do
         local entry = SimpleLFGFrame.entries[i]
-        local playerData = sortedEntries[i]
+        local index = i + FauxScrollFrame_GetOffset(SimpleLFGScrollFrame)
+        local playerData = sortedEntries[index]
+        
         if playerData then
             local playerName = playerData.name
             local data = playerData.data
             local currentTime = GetTime()
             entry.playerData = playerName
-            -- Cachear el nivel si alguna vez se obtiene
-            local level = data.level or SimpleLFG:GetPlayerLevel(playerName)
+            
+            -- Intentar obtener el nivel del jugador
+            local level = SimpleLFG:GetPlayerLevel(playerName)
             if level and level ~= "-" then
                 data.level = level
-            else
-                level = "-"
             end
-            entry.level:SetText(level)
+            entry.level:SetText(data.level or "-")
+            
+            -- Truncar mensaje si es muy largo
             local msg = data.message or ""
-            if string.len(msg) > 50 then
-                msg = string.sub(msg, 1, 47).."..."
+            if string.len(msg) > 30 then
+                msg = string.sub(msg, 1, 27).."..."
             end
+            
             entry.playerName:SetText(playerName)
             entry.dungeon:SetText(msg)
             entry.timer:SetText(SimpleLFG:FormatTime(currentTime - data.timestamp))
-            
-            -- Ajustar la posición vertical (más recientes arriba)
-            entry:SetPoint("TOPLEFT", 15, startY - ((i-1) * entryHeight))
             entry:Show()
+        else
+            entry:Hide()
         end
     end
 end
@@ -704,25 +788,67 @@ function SimpleLFG:ShowConfig()
     ConfigFrame:Show()
 end
 
--- Inicializar el addon
-SimpleLFG:Initialize()
-
 -- Encontrar el nivel del jugador
 function SimpleLFG:GetPlayerLevel(playerName)
     if playerName == UnitName("player") then
         return UnitLevel("player")
     end
-    for i = 1, (GetNumRaidMembers and GetNumRaidMembers() or 0) do
-        local name, _, _, level = GetRaidRosterInfo and GetRaidRosterInfo(i) or UnitName("raid"..i), nil, nil, nil
+    
+    if not SimpleLFG.playerDB then
+        SimpleLFG.playerDB = {}
+    end
+
+    -- Si ya tenemos el nivel, lo devolvemos
+    if SimpleLFG.playerDB[playerName] then
+        return SimpleLFG.playerDB[playerName]
+    end
+
+    -- Si ya está en la cola, no lo agregamos de nuevo
+    for _, name in ipairs(SimpleLFG.whoQueue) do
         if name == playerName then
-            return level or "-"
+            return "-"
         end
     end
-    for i = 1, (GetNumPartyMembers and GetNumPartyMembers() or 0) do
-        local name = UnitName("party"..i)
-        if name == playerName then
-            return UnitLevel("party"..i) or "-"
-        end
-    end
+
+    -- Agregar a la cola y lanzar consulta si no hay otra activa
+    table.insert(SimpleLFG.whoQueue, playerName)
+    SimpleLFG:ProcessWhoQueue()
+
     return "-"
-end 
+end
+
+function SimpleLFG:ProcessWhoQueue()
+    if SimpleLFG.whoActive or table.getn(SimpleLFG.whoQueue) == 0 then return end
+    local nextName = table.remove(SimpleLFG.whoQueue, 1)
+    if nextName then
+        SimpleLFG.whoActive = nextName
+        SendWho(nextName)
+    end
+end
+
+-- Handler para WHO_LIST_UPDATE
+if not SimpleLFG._whoEventFrame then
+    SimpleLFG._whoEventFrame = CreateFrame("Frame")
+    SimpleLFG._whoEventFrame:RegisterEvent("WHO_LIST_UPDATE")
+    SimpleLFG._whoEventFrame:SetScript("OnEvent", function()
+        if event == "WHO_LIST_UPDATE" and SimpleLFG.whoActive then
+            local numWhos = GetNumWhoResults()
+            for i = 1, numWhos do
+                local name, _, level = GetWhoInfo(i)
+                if name and level and level > 0 then
+                    SimpleLFG.playerDB[name] = level
+                end
+            end
+            SimpleLFG.whoActive = false
+            -- Actualizar la UI si está visible
+            if SimpleLFGFrame and SimpleLFGFrame:IsVisible() then
+                SimpleLFG:UpdateDisplay()
+            end
+            -- Procesar siguiente en la cola
+            SimpleLFG:ProcessWhoQueue()
+        end
+    end)
+end
+
+-- Inicializar el addon
+SimpleLFG:Initialize() 
